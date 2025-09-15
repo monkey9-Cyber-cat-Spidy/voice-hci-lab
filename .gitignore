@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+results/run-*.json
+results/index.html
+.voice_action_trust.json
+.remember/
+
+create_git_history.mjs
