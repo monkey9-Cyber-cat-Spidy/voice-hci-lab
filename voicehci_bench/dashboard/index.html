@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoiceHCI-Bench</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" integrity="sha384-bs/nf9FbdNouRbMiFcrcZfLXYPKiPaGVGplVbv7dLGECccEXDW+S3zjqSKR5ZEaD" crossorigin="anonymous"></script>
+<style>
+:root{
+  --bg:#f6f7f9;--card:#ffffff;--ink:#14161a;--muted:#5d6572;--line:#e3e6ea;
+  --s1:#2563eb;--s2:#f59e0b;--s3:#10b981;--s4:#8b5cf6;--s5:#ef4444;--s6:#0ea5e9;--s7:#64748b;
+  --good:#10b981;--bad:#ef4444;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1115;--card:#171a21;--ink:#e8eaee;--muted:#9aa3b2;--line:#262b35;
+  }
+}
+:root[data-theme="dark"]{--bg:#0f1115;--card:#171a21;--ink:#e8eaee;--muted:#9aa3b2;--line:#262b35;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0 16px 48px}
+header{max-width:1200px;margin:0 auto;padding:28px 0 8px;display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;justify-content:space-between}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+h2{font-size:16px;margin:28px 0 10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.meta{color:var(--muted);font-size:13px}
+main{max-width:1200px;margin:0 auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card .k{font-size:12px;color:var(--muted)}
+.card .v{font-size:26px;font-weight:650;letter-spacing:-.02em;margin-top:2px}
+.card .d{font-size:12px;color:var(--muted);margin-top:4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-height:280px}
+.panel h3{margin:0 0 6px;font-size:14px}
+.panel p{margin:0 0 8px;color:var(--muted);font-size:12px}
+canvas{max-height:260px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--card)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.heat td.cell{text-align:center;border-radius:6px;font-variant-numeric:tabular-nums}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0 12px}
+select,input[type=file],button{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.wrap{overflow:auto;max-height:520px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.ok{color:var(--good)}.bad{color:var(--bad)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+#empty{padding:40px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>VoiceHCI-Bench</h1>
+    <div class="meta" id="meta">loading results/latest.json …</div>
+  </div>
+  <div class="controls">
+    <label>Results file <input type="file" id="file" accept="application/json"></label>
+  </div>
+</header>
+<main>
+  <div id="empty" hidden>No results loaded. Run <span class="mono">voicehci-bench run</span> then <span class="mono">voicehci-bench serve</span>, or pick a results JSON above.</div>
+  <div id="app" hidden>
+    <h2>Headline</h2>
+    <div class="cards" id="cards"></div>
+
+    <h2>Dictation systems</h2>
+    <div class="grid">
+      <div class="panel"><h3>Time to first action</h3><p>Speech onset → first visible UI change, median ms (lower is better).</p><canvas id="c_ttfa"></canvas></div>
+      <div class="panel"><h3>Correction overhead rate</h3><p>Keystrokes a human needs to fix the output, per intended character.</p><canvas id="c_cor"></canvas></div>
+      <div class="panel"><h3>Intent drift under disfluency</h3><p>Share of pivot utterances where the retracted thought leaked (or the correction went missing).</p><canvas id="c_drift"></canvas></div>
+      <div class="panel"><h3>Latency vs correction (Pareto)</h3><p>Each point is a system: TTFA median against COR. Bottom-left wins.</p><canvas id="c_pareto"></canvas></div>
+      <div class="panel"><h3>Rewrite ratio</h3><p>Keystrokes the system itself dispatched per intended character. A flicker proxy for streaming systems.</p><canvas id="c_rewrite"></canvas></div>
+      <div class="panel"><h3>Tail latency</h3><p>User stops talking → output stops changing, median ms.</p><canvas id="c_tail"></canvas></div>
+    </div>
+
+    <h2>Action systems</h2>
+    <div class="grid">
+      <div class="panel"><h3>TTFA: speculative vs serial</h3><p>Median and p90, ms.</p><canvas id="c_act_ttfa"></canvas></div>
+      <div class="panel"><h3>Accuracy</h3><p>Intent and slot accuracy, prewarm hit rate.</p><canvas id="c_act_acc"></canvas></div>
+    </div>
+
+    <h2>Correction overhead by category</h2>
+    <div class="wrap"><table class="heat" id="heat"></table></div>
+
+    <h2>Record explorer</h2>
+    <div class="controls">
+      <label>System <select id="f_sys"></select></label>
+      <label>Category <select id="f_cat"></select></label>
+      <label><input type="checkbox" id="f_bad"> only imperfect</label>
+      <span class="meta" id="f_count"></span>
+    </div>
+    <div class="wrap"><table id="rows"></table></div>
+  </div>
+</main>
+<script>
+const PAL=['--s1','--s2','--s3','--s4','--s5','--s6','--s7'].map(v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+Chart.defaults.color=css('--muted');Chart.defaults.borderColor=css('--line');Chart.defaults.font.family='system-ui,sans-serif';
+let charts=[];
+const fmt=(v,d=0)=>v==null?'-':Number(v).toFixed(d);
+
+function bar(id,labels,data,opts={}){
+  const ctx=document.getElementById(id);
+  const ch=new Chart(ctx,{type:'bar',data:{labels,datasets:[{data,backgroundColor:labels.map((_,i)=>PAL[i%PAL.length]),borderRadius:6}]},
+    options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw,opts.dec??0)+(opts.unit||'')}}},
+      scales:{y:{beginAtZero:true,max:opts.max,ticks:{callback:v=>v+(opts.unit||'')}},x:{ticks:{autoSkip:false,maxRotation:30}}}}});
+  charts.push(ch);
+}
+function grouped(id,labels,series,opts={}){
+  const ch=new Chart(document.getElementById(id),{type:'bar',data:{labels,datasets:series.map((s,i)=>({label:s.label,data:s.data,backgroundColor:PAL[i%PAL.length],borderRadius:6}))},
+    options:{plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true,max:opts.max},x:{ticks:{autoSkip:false}}}}});
+  charts.push(ch);
+}
+function render(p){
+  charts.forEach(c=>c.destroy());charts=[];
+  document.getElementById('empty').hidden=true;document.getElementById('app').hidden=false;
+  const m=p.meta;document.getElementById('meta').textContent=`${m.n_records} records · ${m.dataset} · ${m.platform} · Python ${m.python} · generated ${new Date(m.generated_at).toLocaleString()} · ${m.wall_seconds}s`;
+  const dict=p.summaries.filter(s=>s.intent_accuracy==null), act=p.summaries.filter(s=>s.intent_accuracy!=null);
+  const best=dict.slice().sort((a,b)=>a.cor_mean-b.cor_mean)[0];
+  const fastest=dict.slice().sort((a,b)=>(a.ttfa_ms_median??1e9)-(b.ttfa_ms_median??1e9))[0];
+  const spec=act.find(s=>/specul/.test(s.system)), ser=act.find(s=>/serial/.test(s.system));
+  const cards=[
+    ['Lowest correction overhead',best?fmt(best.cor_mean,3):'-',best?best.system:''],
+    ['Fastest first action',fastest?fmt(fastest.ttfa_ms_median)+' ms':'-',fastest?fastest.system:''],
+    ['Drift (best system)',best?fmt(best.drift_rate*100,0)+'%':'-','retracted thought leaked'],
+    ['Speculation TTFA gain',spec&&ser?fmt(ser.ttfa_ms_median-spec.ttfa_ms_median)+' ms':'-',spec&&ser?`prewarm hit ${fmt(spec.prewarm_hit_rate*100)}%`:''],
+    ['Compute p95 (engine)',best?fmt(best.compute_ms_p95,2)+' ms':'-','per transcript update'],
+  ];
+  document.getElementById('cards').innerHTML=cards.map(([k,v,d])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('');
+  const L=dict.map(s=>s.system);
+  bar('c_ttfa',L,dict.map(s=>s.ttfa_ms_median),{unit:' ms'});
+  bar('c_cor',L,dict.map(s=>s.cor_mean),{dec:3});
+  bar('c_drift',L,dict.map(s=>s.drift_rate==null?null:s.drift_rate*100),{unit:'%',max:100});
+  bar('c_rewrite',L,dict.map(s=>s.rewrite_ratio_mean),{dec:2});
+  bar('c_tail',L,dict.map(s=>s.tail_latency_ms_median),{unit:' ms'});
+  charts.push(new Chart(document.getElementById('c_pareto'),{type:'scatter',data:{datasets:dict.map((s,i)=>({label:s.system,data:[{x:s.ttfa_ms_median,y:s.cor_mean}],backgroundColor:PAL[i%PAL.length],pointRadius:7}))},
+    options:{plugins:{legend:{position:'bottom'}},scales:{x:{title:{display:true,text:'TTFA median (ms)'},beginAtZero:true},y:{title:{display:true,text:'COR'},beginAtZero:true}}}}));
+  if(act.length){
+    grouped('c_act_ttfa',act.map(s=>s.system),[{label:'median',data:act.map(s=>s.ttfa_ms_median)},{label:'p90',data:act.map(s=>s.ttfa_ms_p90)}]);
+    grouped('c_act_acc',act.map(s=>s.system),[{label:'intent',data:act.map(s=>s.intent_accuracy*100)},{label:'slots',data:act.map(s=>s.slot_accuracy*100)},{label:'prewarm hit',data:act.map(s=>(s.prewarm_hit_rate||0)*100)}],{max:100});
+  }
+  // heat table
+  const cats=[...new Set(p.summaries.flatMap(s=>Object.keys(s.by_category)))].sort();
+  const heat=document.getElementById('heat');
+  heat.innerHTML='<thead><tr><th>system</th>'+cats.map(c=>`<th class="num">${c}</th>`).join('')+'</tr></thead><tbody>'+
+    dict.map(s=>'<tr><td>'+s.system+'</td>'+cats.map(c=>{const b=s.by_category[c];if(!b)return'<td></td>';
+      const v=b.cor_mean;const a=Math.min(1,v/2);const bg=`rgba(239,68,68,${(0.08+a*0.6).toFixed(2)})`;
+      return `<td class="cell" style="background:${bg}">${fmt(v,2)}${b.drift_rate!=null?`<div class="meta">drift ${fmt(b.drift_rate*100)}%</div>`:''}</td>`}).join('')+'</tr>').join('')+'</tbody>';
+  // explorer
+  const fs=document.getElementById('f_sys'),fc=document.getElementById('f_cat'),fb=document.getElementById('f_bad');
+  fs.innerHTML='<option value="">all</option>'+p.summaries.map(s=>`<option>${s.system}</option>`).join('');
+  fc.innerHTML='<option value="">all</option>'+cats.map(c=>`<option>${c}</option>`).join('');
+  const draw=()=>{
+    const rows=p.results.filter(r=>(!fs.value||r.system===fs.value)&&(!fc.value||r.category===fc.value)&&(!fb.checked||r.cor>0||r.drift||r.intent_correct===false||r.slots_correct===false));
+    document.getElementById('f_count').textContent=rows.length+' rows';
+    document.getElementById('rows').innerHTML='<thead><tr><th>id</th><th>system</th><th>cat</th><th>spoken → output</th><th>expected</th><th class="num">TTFA</th><th class="num">COR</th><th class="num">WER</th><th>drift</th></tr></thead><tbody>'+
+      rows.slice(0,400).map(r=>{const rec=p.records[r.record_id]||{};const exp=rec.expected_text||rec.expected_intent||'';
+        return `<tr><td class="mono">${r.record_id}</td><td>${r.system}</td><td>${r.category}</td><td><div class="mono">${esc(rec.spoken||'')}</div><div class="mono ${r.cor>0||r.drift?'bad':'ok'}">→ ${esc(r.output_text)}</div></td><td class="mono">${esc(exp)}</td><td class="num">${fmt(r.ttfa_ms)}</td><td class="num">${fmt(r.cor,3)}</td><td class="num">${fmt(r.wer,2)}</td><td>${r.drift==null?'-':(r.drift?'<span class="bad">yes</span>':'<span class="ok">no</span>')}</td></tr>`}).join('')+'</tbody>';
+  };
+  [fs,fc,fb].forEach(e=>e.onchange=draw);draw();
+}
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+document.getElementById('file').onchange=e=>{const f=e.target.files[0];if(!f)return;f.text().then(t=>render(JSON.parse(t)));};
+fetch('latest.json').then(r=>{if(!r.ok)throw 0;return r.json()}).then(render).catch(()=>{document.getElementById('meta').textContent='';document.getElementById('empty').hidden=false;});
+</script>
+</body>
+</html>
